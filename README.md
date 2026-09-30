@@ -38,15 +38,54 @@ stops being true.
 
 | File | Role |
 | ---- | ---- |
-| `.github/workflows/poll.yml` | Every 5 minutes, asks `rakay` for new commits and dispatches `ci.yml` for the untested ones |
+| `.github/workflows/poll.yml` | Every 5 minutes, asks `rakay` for new commits **and new tags**, then dispatches the two workflows below |
 | `.github/workflows/ci.yml` | Checks the private repo out, installs with pnpm, then lint → typecheck → test → build, and posts the result back as a `rakay-ci` commit status |
-| `.github/workflows/docker-images.yml` | On a tag, publishes `rakay-api` and `rakay-web` to the private `ghcr.io/rakay-technology` namespace |
+| `.github/workflows/docker-images.yml` | Builds and publishes `rakay-api` and `rakay-web` to the private `ghcr.io/rakay-technology` namespace, once CI is green on the tag |
 | `.github/workflows/privacy.yml` | Fails if any of the guarantees above is broken |
 | `scripts/poll-rakay.mjs` | The poller itself |
 
 The images go to the `rakay-technology` GHCR namespace and carry an
 `org.opencontainers.image.source` label pointing at the private repo, which is
 what makes them show up under `rakay → Packages`.
+
+## Releasing
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0     # on rakay — that's the whole gesture
+```
+
+Within five minutes the poller sees the tag and walks through:
+
+1. **Is the commit green?** It reads the `rakay-ci` status on the commit the tag
+   points at. No status, or still running → it asks for the test first and
+   publishes nothing this tick.
+2. **Red?** Nothing is published, and nothing is recorded — a tag that failed is
+   retried on the next tick, so re-running CI by hand is enough to unblock it.
+   This is deliberate: recording the failure would freeze that tag forever.
+3. **Green?** It fires `rakay-release`, which is `docker-images.yml`: the gate
+   re-checks the status, then `rakay-api` and `rakay-web` are built in parallel
+   and pushed, tagged with the release tag plus `latest` (unless the tag contains
+   a hyphen, so a `-rc1` never moves `latest`).
+
+A tag that is **moved** onto another commit is rebuilt; a tag that already
+produced images for its commit is not published twice.
+
+`on: push: tags:` in `rakay` cannot do any of this: the private repo has no
+Actions minutes, so none of its own jobs ever start — a tag push there is silent.
+The event has to be observed from this side.
+
+Only tags matching `RAKAY_TAG_PATTERN` (default `^v`) are considered, so a
+throwaway tag does not trigger a build:
+
+```bash
+gh variable set RAKAY_TAG_PATTERN --body '^v' -R <this-org>/rakay-ci
+```
+
+To publish a tag right now instead of waiting for the tick:
+
+```bash
+gh workflow run "Docker images" -R $ORG/rakay-ci -f tag=v0.1.0
+```
 
 ## The one secret
 
@@ -88,7 +127,8 @@ gh workflow run poll.yml -R $ORG/rakay-ci
 
 - **A commit is tested once**, pass or fail, keyed by SHA in
   `.ci-state/state.json`. Re-running CI on the same commit on purpose means
-  dispatching `ci.yml` by hand; the poller will not do it again.
+  dispatching `ci.yml` by hand; the poller will not do it again. Tags are the
+  one thing that is retried, on purpose — see *Releasing* above.
 - **Scheduled workflows are suspended after 60 days without repository
   activity.** The state file is committed on most ticks, which keeps this repo
   active, but if CI ever stops silently, check Actions → *Poll rakay* for the

@@ -8,8 +8,16 @@ name: Docker images
 # the org namespace, and the label below links each one to the private repo, so
 # they show up under rakay → Packages.
 #
-# Trigger, once the tag exists on the private repo:
-#   gh workflow run "Docker images" -R <this-org>/rakay-ci -f tag=v0.1.0
+# Two ways in:
+#
+#   · repository_dispatch `rakay-release`, client_payload.tag — fired by
+#     poll.yml within five minutes of a tag appearing on the private repo.
+#     `on: push: tags:` in rakay could never do this: the private repo has no
+#     Actions minutes, so no job of its own ever starts, not even a dispatcher.
+#
+#   · workflow_dispatch `-f tag=v0.1.0` — the manual escape hatch, and what to
+#     use when the poller has not caught up yet:
+#       gh workflow run "Docker images" -R <this-org>/rakay-ci -f tag=v0.1.0
 
 on:
   workflow_dispatch:
@@ -18,9 +26,14 @@ on:
         description: "Tag on rakay-technology/rakay to build + publish (e.g. v0.1.0)"
         required: true
         type: string
+  repository_dispatch:
+    types: [rakay-release]
+
+run-name: Docker images — ${{ github.event.inputs.tag || github.event.client_payload.tag }}
 
 concurrency:
-  group: docker-images-${{ inputs.tag }}
+  # One build per tag, whichever way it was triggered.
+  group: docker-images-${{ github.event.inputs.tag || github.event.client_payload.tag }}
   cancel-in-progress: false
 
 permissions:
@@ -30,11 +43,15 @@ env:
   RAKAY_REPO: rakay-technology/rakay
   # The GHCR namespace, which is the ORG, not the repo that runs this workflow.
   REGISTRY: ghcr.io/rakay-technology
+  # One tag, two triggers: an input when dispatched by hand, a payload field
+  # when poll.yml found the tag on its own.
+  TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
 
 jobs:
   # Publishing an image tag that never passed CI is how a broken revision reaches
   # the server. The gate reads the same commit status poll.yml/ci.yml maintain,
-  # so the two halves cannot disagree.
+  # so the two halves cannot disagree. It also covers the manual dispatch, which
+  # does not go through the poller.
   gate:
     name: Release gate
     runs-on: ubuntu-latest
@@ -43,7 +60,6 @@ jobs:
       - name: Require a green rakay-ci status on the tag
         env:
           GH_TOKEN: ${{ secrets.RAKAY_PAT }}
-          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           SHA="$(gh api "repos/${RAKAY_REPO}/commits/${TAG}" --jq '.sha')"
@@ -78,7 +94,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ env.RAKAY_REPO }}
-          ref: ${{ inputs.tag }}
+          ref: ${{ env.TAG }}
           token: ${{ secrets.RAKAY_PAT }}
           persist-credentials: false
 
@@ -101,10 +117,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/rakay-${{ matrix.image }}
           tags: |
-            type=raw,value=${{ inputs.tag }}
+            type=raw,value=${{ env.TAG }}
             # A tag carrying a hyphen is a pre-release (v0.1.0-rc1): it gets its
             # own tag and never moves `latest`.
-            type=raw,value=latest,enable=${{ !contains(inputs.tag, '-') }}
+            type=raw,value=latest,enable=${{ !contains(env.TAG, '-') }}
 
       # The `source` label is what makes the package appear under the PRIVATE
       # repo's Packages tab. It is set by hand on purpose: the auto-generated
@@ -120,13 +136,13 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ env.RAKAY_REPO }}
             org.opencontainers.image.title=rakay-${{ matrix.image }}
-            org.opencontainers.image.version=${{ inputs.tag }}
+            org.opencontainers.image.version=${{ env.TAG }}
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: ${{ matrix.build_args }}
-          # No `cache-from` / `cache-to: type=gha` on purpose. That cache lives in
-          # THIS public repository, and Docker's layer cache stores the layer
+          # No `cache-from` / `cache-to: type=gha` on purpose. That cache lives
+          # in THIS public repository, and Docker's layer cache stores the layer
           # contents — including the ones produced by the COPY of the private
-          # source and by the builds themselves. Rebuild time is the price of not
-          # parking the private tree in a public cache. If it ever becomes a
+          # source and by the builds themselves. Rebuild time is the price of
+          # not parking the private tree in a public cache. If it ever becomes a
           # problem, `type=registry` against the private GHCR namespace is the
           # cache that does not leak.

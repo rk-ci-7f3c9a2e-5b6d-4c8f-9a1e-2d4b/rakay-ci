@@ -11,6 +11,12 @@ name: Poll rakay
 # of the private repo, install, lint, typecheck, test, build — is all in ci.yml
 # and runs here too.
 #
+# It also watches TAGS, because `on: push: tags:` in the private repo would never
+# fire: no minutes there means no job of its own, not even a dispatcher. A tag
+# whose commit is green on `rakay-ci` gets a `rakay-release` dispatch, which
+# docker-images.yml turns into the two published images. A tag on an untested or
+# broken commit gets the test instead of shipping it.
+#
 # Dedup is by SHA and lives in .ci-state/state.json, which is the ONLY file this
 # workflow ever commits back. A commit is tested once, pass or fail; a run that
 # never reports is re-dispatched after 25 minutes, so a lost run heals on its own
@@ -73,6 +79,9 @@ jobs:
           GH_TOKEN: ${{ secrets.RAKAY_PAT }}
           GITHUB_TOKEN: ${{ github.token }}
           RAKAY_BRANCH: ${{ inputs.branch || 'main' }}
+          # Which tags are worth an image build. Change it without touching this
+          # file:  gh variable set RAKAY_TAG_PATTERN --body '^v'
+          RAKAY_TAG_PATTERN: ${{ vars.RAKAY_TAG_PATTERN || '^v' }}
         run: node scripts/poll-rakay.mjs
 
       - name: Commit state
