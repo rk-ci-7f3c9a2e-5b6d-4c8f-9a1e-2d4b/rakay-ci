@@ -1,0 +1,127 @@
+name: Docker images
+
+# Publishes the production images to the PRIVATE GHCR namespace
+# ghcr.io/rakay-technology (rakay-api + rakay-web). Runs in the public rakay-ci
+# repo — free minutes — against a tag of the PRIVATE rakay-technology/rakay.
+#
+# No image, tag or release is ever stored in this public repo: the images land in
+# the org namespace, and the label below links each one to the private repo, so
+# they show up under rakay → Packages.
+#
+# Trigger, once the tag exists on the private repo:
+#   gh workflow run "Docker images" -R <this-org>/rakay-ci -f tag=v0.1.0
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag on rakay-technology/rakay to build + publish (e.g. v0.1.0)"
+        required: true
+        type: string
+
+concurrency:
+  group: docker-images-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RAKAY_REPO: rakay-technology/rakay
+  # The GHCR namespace, which is the ORG, not the repo that runs this workflow.
+  REGISTRY: ghcr.io/rakay-technology
+
+jobs:
+  # Publishing an image tag that never passed CI is how a broken revision reaches
+  # the server. The gate reads the same commit status poll.yml/ci.yml maintain,
+  # so the two halves cannot disagree.
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a green rakay-ci status on the tag
+        env:
+          GH_TOKEN: ${{ secrets.RAKAY_PAT }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          SHA="$(gh api "repos/${RAKAY_REPO}/commits/${TAG}" --jq '.sha')"
+          STATE="$(gh api "repos/${RAKAY_REPO}/commits/${SHA}/status" \
+            --jq '[.statuses[] | select(.context == "rakay-ci")][0].state // "missing"')"
+          echo "${TAG} → ${SHA}: rakay-ci is ${STATE}"
+          if [ "${STATE}" != "success" ]; then
+            echo "::error::refusing to publish: rakay-ci is '${STATE}' on ${SHA}. Run CI on that ref first (poll.yml does it every 5 min, or dispatch ci.yml by hand)."
+            exit 1
+          fi
+
+  build-images:
+    name: Build ${{ matrix.image }}
+    needs: [gate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            dockerfile: apps/api/Dockerfile
+            build_args: ""
+          - image: web
+            dockerfile: apps/web/Dockerfile
+            # Baked into the client bundle at build time: the visitor's browser
+            # calls this. Same-origin path, which is what the panel's OpenResty
+            # proxies to the API.
+            build_args: NEXT_PUBLIC_API_URL=/api/v1
+    steps:
+      - name: Checkout private rakay
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.RAKAY_REPO }}
+          ref: ${{ inputs.tag }}
+          token: ${{ secrets.RAKAY_PAT }}
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # The PAT, not GITHUB_TOKEN: the images go to the rakay-technology
+      # namespace, which is not this repository's namespace, so the ephemeral
+      # workflow token has no write access to it.
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.RAKAY_PAT }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/rakay-${{ matrix.image }}
+          tags: |
+            type=raw,value=${{ inputs.tag }}
+            # A tag carrying a hyphen is a pre-release (v0.1.0-rc1): it gets its
+            # own tag and never moves `latest`.
+            type=raw,value=latest,enable=${{ !contains(inputs.tag, '-') }}
+
+      # The `source` label is what makes the package appear under the PRIVATE
+      # repo's Packages tab. It is set by hand on purpose: the auto-generated
+      # one would name THIS public repo, since that is where the workflow runs.
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ env.RAKAY_REPO }}
+            org.opencontainers.image.title=rakay-${{ matrix.image }}
+            org.opencontainers.image.version=${{ inputs.tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: ${{ matrix.build_args }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

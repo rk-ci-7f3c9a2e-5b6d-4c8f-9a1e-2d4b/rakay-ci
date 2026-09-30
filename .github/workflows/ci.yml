@@ -1,0 +1,148 @@
+name: CI
+
+# Runs in rk-ci-7f3c9a2e-5b6d-4c8f-9a1e-2d4b/rakay-ci (PUBLIC repo, unlimited free
+# minutes). Builds + tests the PRIVATE rakay-technology/rakay at a given ref.
+# Nothing is published from here: images are built by docker-images.yml, on a tag.
+#
+# Two ways in, both producing the same run:
+#
+#   · repository_dispatch type `rakay-ci`, client_payload.sha — fired by poll.yml
+#     on every new commit of the private repo.
+#   · workflow_dispatch `-f ref=<branch|tag|sha>` — the manual escape hatch, and
+#     what a deploy step can call from the server:
+#       gh workflow run ci.yml -R <this-org>/rakay-ci -f ref=$(git rev-parse HEAD)
+#
+# WHY the trigger is not in the private repo: GitHub bills Actions minutes per
+# repository, and the private one has none left — its jobs never start at all.
+# Checking the private repo out from here costs nothing, because this repo is
+# public and public-repo minutes are unlimited.
+#
+# The whole chain runs in ONE job on purpose. Each job would need its own
+# checkout + pnpm install (the expensive part), and the four checks want the same
+# node_modules; splitting them would quadruple the install for no benefit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or SHA of rakay-technology/rakay to validate (default: main)"
+        required: false
+        type: string
+        default: main
+  repository_dispatch:
+    types: [rakay-ci]
+
+concurrency:
+  # One run per ref. A force-push supersedes the previous run for that ref.
+  group: ci-${{ github.event.inputs.ref || github.event.client_payload.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Same major as apps/api/Dockerfile (node:24-alpine) and above the
+  # `engines.node >= 20.9` of the root package.json.
+  NODE_VERSION: "24"
+  # Inlined into the client bundle by `next build`. A same-origin path is what
+  # the production reverse proxy serves, so the bundle does not carry a domain.
+  NEXT_PUBLIC_API_URL: /api/v1
+  TURBO_TELEMETRY_DISABLED: "1"
+
+jobs:
+  checks:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout private rakay
+        uses: actions/checkout@v7
+        with:
+          repository: rakay-technology/rakay
+          # A branch, tag or SHA string (workflow_dispatch) or a real SHA
+          # (repository_dispatch). checkout accepts both.
+          ref: ${{ github.event.inputs.ref || github.event.client_payload.sha }}
+          token: ${{ secrets.RAKAY_PAT }}
+
+      # Order matters: setup-node's `cache: pnpm` shells out to pnpm, so pnpm has
+      # to exist first. No `version` is passed — the action reads
+      # `packageManager: pnpm@10.0.0` from package.json, so the CI and the
+      # lockfile can never disagree about the pnpm that produced it.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      # --frozen-lockfile: the lockfile is the contract. A manifest that no
+      # longer matches it fails here rather than resolving something different
+      # from what production installs.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # `turbo run test` → vitest. apps/api is the only workspace with a test
+      # script today (a unit suite with mocked repositories, no database), and
+      # turbo skips the workspaces that declare none.
+      - name: Test
+        run: pnpm test
+
+      # Both apps, through turbo: `nest build` and `next build`. This is what
+      # catches a broken import or a bad rewrite before the image is built.
+      - name: Build
+        run: pnpm build
+
+  # Post the outcome back to the private repo so the commit — and therefore the
+  # PR that heads it — shows the real result. `always()` so a failure reports
+  # too; a silent job would leave the PR with no rakay-ci check at all, which is
+  # worse than a red one.
+  report:
+    name: Report to rakay
+    needs: [checks]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post commit status
+        env:
+          GH_TOKEN: ${{ secrets.RAKAY_PAT }}
+          # A raw ref, not necessarily a SHA: workflow_dispatch carries a
+          # branch/tag/sha string, repository_dispatch carries a real SHA. The
+          # statuses API only accepts an object ID, so resolve it either way.
+          RAW_REF: ${{ github.event.inputs.ref || github.event.client_payload.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULT: ${{ needs.checks.result }}
+        run: |
+          set -euo pipefail
+          SHA="$(gh api "repos/rakay-technology/rakay/commits/${RAW_REF}" --jq '.sha' 2>/dev/null || echo '')"
+          if [ -z "${SHA}" ]; then
+            # Nothing to attach the status to (an unpushed branch, a deleted
+            # ref). Print the reason and stop: this step is only the PR-facing
+            # summary, so it must not fail the run.
+            echo "::notice::cannot resolve '${RAW_REF}' to a rakay commit — skipping the status."
+            exit 0
+          fi
+          echo "reporting to rakay ${SHA} (${RAW_REF})"
+          case "${RESULT}" in
+            success)
+              state=success
+              desc="lint + typecheck + test + build passed" ;;
+            *)
+              state=failure
+              desc="CI ${RESULT} — open the run for the failing step" ;;
+          esac
+          echo "→ rakay ${SHA}: ${state} (${desc})"
+          gh api "repos/rakay-technology/rakay/statuses/${SHA}" \
+            -f state="${state}" \
+            -f context="rakay-ci" \
+            -f description="${desc}" \
+            -f target_url="${RUN_URL}" \
+            --silent

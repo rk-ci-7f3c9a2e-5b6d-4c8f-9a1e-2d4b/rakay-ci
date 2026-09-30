@@ -1,0 +1,100 @@
+name: Poll rakay
+
+# The free half of rakay's CI. The private rakay-technology/rakay cannot run any
+# Actions job at all — it is out of minutes, so even a two-second dispatcher
+# fails with `steps: []` and `runner_id: 0`. That was verified on the kraft pair,
+# so it is a property of the account, not of a particular workflow.
+#
+# So the trigger lives HERE instead, where runners are free. Every few minutes
+# this poller asks rakay for the commits it cares about and dispatches the `CI`
+# workflow for the ones that have not been tested yet. The heavy work — checkout
+# of the private repo, install, lint, typecheck, test, build — is all in ci.yml
+# and runs here too.
+#
+# Dedup is by SHA and lives in .ci-state/state.json, which is the ONLY file this
+# workflow ever commits back. A commit is tested once, pass or fail; a run that
+# never reports is re-dispatched after 25 minutes, so a lost run heals on its own
+# instead of waiting for the next push.
+#
+# Nothing here writes to rakay. ci.yml's `report` job owns that side, and this
+# workflow reads what it posted.
+#
+# CAVEAT: GitHub suspends scheduled workflows in a repository with no activity for
+# 60 days. This repo stays active — the state file is committed on most ticks —
+# but if CI silently stops, check Actions → "Poll rakay" for the suspended banner
+# before debugging anything else.
+
+on:
+  schedule:
+    # Every 5 minutes — GitHub's floor. Runs are free on a public repo, so the
+    # only cost of a short interval is how quickly a failure is noticed.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "rakay branch to poll (default main)"
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: write # commits .ci-state/state.json
+
+concurrency:
+  # A poll that overlaps the previous one would double-dispatch. Serialise them.
+  group: poll-rakay
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    name: Poll rakay for untested commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Until RAKAY_PAT is set, every tick would fail on a missing token — that is
+    # a red run every five minutes for a condition the reader can do nothing
+    # about from the log. Skipping with a warning says the same thing once.
+    env:
+      RAKAY_PAT_SET: ${{ secrets.RAKAY_PAT != '' }}
+    steps:
+      - name: Checkout rakay-ci
+        uses: actions/checkout@v7
+
+      - name: Warn when the secret is missing
+        if: ${{ env.RAKAY_PAT_SET != 'true' }}
+        run: |
+          echo "::warning::RAKAY_PAT is not configured on this repository, so there is nothing to authenticate with. Add it in Settings → Secrets and variables → Actions — see README.md."
+
+      # RAKAY_PAT already exists here — it is what ci.yml uses to check the
+      # private rakay out and to post the commit status back. Reusing it means no
+      # second secret to rotate.
+      - name: Poll and dispatch
+        if: ${{ env.RAKAY_PAT_SET == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.RAKAY_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
+          RAKAY_BRANCH: ${{ inputs.branch || 'main' }}
+        run: node scripts/poll-rakay.mjs
+
+      - name: Commit state
+        run: |
+          set -euo pipefail
+          # `git diff --quiet` only sees TRACKED files, and the state file is
+          # untracked until its first commit — so this step would silently no-op
+          # on the very run that creates it. Match on porcelain output, which
+          # covers modified AND untracked.
+          if [ -z "$(git status --porcelain -- .ci-state/state.json)" ]; then
+            echo "no state change"
+            exit 0
+          fi
+          git config user.name  "rakay-ci[bot]"
+          git config user.email "rakay-ci[bot]@users.noreply.github.com"
+          git add .ci-state/state.json
+          git commit -m "chore(ci): record poll results [skip ci]"
+          # Rebase onto whatever landed meanwhile rather than failing the tick.
+          for i in 1 2 3; do
+            git pull --rebase --autostash -q origin "${GITHUB_REF_NAME}" \
+              && git push -q origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            echo "push attempt $i failed — retrying"
+            sleep 3
+          done
+          echo "::warning::could not push state; the next tick will re-derive it"
