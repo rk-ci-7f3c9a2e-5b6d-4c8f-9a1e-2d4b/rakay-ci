@@ -11,9 +11,10 @@ name: Docker images
 # Two ways in:
 #
 #   · repository_dispatch `rakay-release`, client_payload.tag — fired by
-#     poll.yml within five minutes of a tag appearing on the private repo.
-#     `on: push: tags:` in rakay could never do this: the private repo has no
-#     Actions minutes, so no job of its own ever starts, not even a dispatcher.
+#     poll.yml when it notices a tag on the private repo, or directly by
+#     `make release` there. `on: push: tags:` in rakay could never do this: the
+#     private repo has no Actions minutes, so no job of its own ever starts, not
+#     even a dispatcher.
 #
 #   · workflow_dispatch `-f tag=v0.1.0` — the manual escape hatch, and what to
 #     use when the poller has not caught up yet:
@@ -67,7 +68,7 @@ jobs:
             --jq '[.statuses[] | select(.context == "rakay-ci")][0].state // "missing"')"
           echo "${TAG} → ${SHA}: rakay-ci is ${STATE}"
           if [ "${STATE}" != "success" ]; then
-            echo "::error::refusing to publish: rakay-ci is '${STATE}' on ${SHA}. Run CI on that ref first (poll.yml does it every 5 min, or dispatch ci.yml by hand)."
+            echo "::error::refusing to publish: rakay-ci is '${STATE}' on ${SHA}. Run CI on that ref first: gh workflow run ci.yml -R ${GITHUB_REPOSITORY} -f ref=${TAG}"
             exit 1
           fi
 

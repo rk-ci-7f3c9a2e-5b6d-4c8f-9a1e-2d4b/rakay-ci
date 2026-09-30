@@ -5,8 +5,8 @@ name: Poll rakay
 # fails with `steps: []` and `runner_id: 0`. That was verified on the kraft pair,
 # so it is a property of the account, not of a particular workflow.
 #
-# So the trigger lives HERE instead, where runners are free. Every few minutes
-# this poller asks rakay for the commits it cares about and dispatches the `CI`
+# So the trigger lives HERE instead, where runners are free. Every tick this
+# poller asks rakay for the commits it cares about and dispatches the `CI`
 # workflow for the ones that have not been tested yet. The heavy work — checkout
 # of the private repo, install, lint, typecheck, test, build — is all in ci.yml
 # and runs here too.
@@ -32,8 +32,12 @@ name: Poll rakay
 
 on:
   schedule:
-    # Every 5 minutes — GitHub's floor. Runs are free on a public repo, so the
-    # only cost of a short interval is how quickly a failure is noticed.
+    # Not every 5 minutes, whatever the cron says. GitHub runs a scheduled
+    # workflow when its own scheduler decides to, and on this account that is a
+    # few times a day: measured on kraft-ci, same cron, 21 ticks in four days —
+    # one every ~4.6 hours, with gaps from 3 h to 7.5 h. Treat this as a
+    # catch-up net, not a trigger; `make push` and `make release` in the private
+    # repo dispatch immediately and are the path to rely on.
     - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
@@ -57,8 +61,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Until RAKAY_PAT is set, every tick would fail on a missing token — that is
-    # a red run every five minutes for a condition the reader can do nothing
-    # about from the log. Skipping with a warning says the same thing once.
+    # a red run for a condition the reader can do nothing about from the log.
+    # Skipping with a warning says the same thing once.
     env:
       RAKAY_PAT_SET: ${{ secrets.RAKAY_PAT != '' }}
     steps:

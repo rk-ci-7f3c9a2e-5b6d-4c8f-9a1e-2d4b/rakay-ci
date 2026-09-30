@@ -38,7 +38,7 @@ stops being true.
 
 | File | Role |
 | ---- | ---- |
-| `.github/workflows/poll.yml` | Every 5 minutes, asks `rakay` for new commits **and new tags**, then dispatches the two workflows below |
+| `.github/workflows/poll.yml` | Asks `rakay` for new commits **and new tags**, then dispatches the two workflows below. A catch-up net, not a trigger: GitHub runs it when it feels like it — see *How often the poller actually runs* |
 | `.github/workflows/ci.yml` | Checks the private repo out, installs with pnpm, then lint → typecheck → test → build, and posts the result back as a `rakay-ci` commit status |
 | `.github/workflows/docker-images.yml` | Builds and publishes `rakay-api` and `rakay-web` to the private `ghcr.io/rakay-technology` namespace, once CI is green on the tag |
 | `.github/workflows/privacy.yml` | Fails if any of the guarantees above is broken |
@@ -51,10 +51,11 @@ what makes them show up under `rakay → Packages`.
 ## Releasing
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0     # on rakay — that's the whole gesture
+make release            # in rakay: pushes the tags, then dispatches the build
+make release TAG=v0.1.0
 ```
 
-Within five minutes the poller sees the tag and walks through:
+Or let the poller find the tag by itself — it will, eventually. Either way:
 
 1. **Is the commit green?** It reads the `rakay-ci` status on the commit the tag
    points at. No status, or still running → it asks for the test first and
@@ -122,6 +123,30 @@ gh workflow run "Docker images" -R $ORG/rakay-ci -f tag=v0.1.0
 # force a poll instead of waiting for the next tick
 gh workflow run poll.yml -R $ORG/rakay-ci
 ```
+
+## How often the poller actually runs
+
+Not every 5 minutes, whatever the cron expression says. **GitHub runs a
+scheduled workflow when its own scheduler decides to**, and on this account that
+is a few times a day. Measured on `kraft-ci`, which has the identical cron:
+
+```
+21 ticks in four days   →   one every ~4.6 hours
+gaps between ticks: 3 h to 7.5 h
+```
+
+The GitHub docs allow for it — *"the schedule event can be delayed during periods
+of high loads… some queued jobs may be dropped"* — but the measured reality is
+worth stating plainly: this trigger is best-effort and slow.
+
+Consequences, so nobody is surprised:
+
+- `make push` and `make release` in the private repo are the **immediate** path.
+  They dispatch directly and CI starts in seconds.
+- The poller's job is to catch what those did not: a push from another machine,
+  a tag pushed by hand, an open pull request. It gets there within hours, not
+  minutes.
+- Never wait on the poller before doing something else.
 
 ## Two things to know
 
