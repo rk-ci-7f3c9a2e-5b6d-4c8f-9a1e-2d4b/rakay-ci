@@ -95,9 +95,12 @@ jobs:
           - image: web
             dockerfile: apps/web/Dockerfile
             # Baked into the client bundle at build time: the visitor's browser
-            # calls this. Same-origin path, which is what the panel's OpenResty
-            # proxies to the API.
-            build_args: NEXT_PUBLIC_API_URL=/api/v1
+            # calls this. Default: the same-origin path the reverse proxy routes
+            # to the API. Set the repo variable RAKAY_WEB_API_URL to point the
+            # browser at an external API origin instead, e.g.
+            #   gh variable set RAKAY_WEB_API_URL -R <this-org>/rakay-ci \
+            #     --body 'https://api.rakay-technology.com/api/v1'
+            build_args: NEXT_PUBLIC_API_URL=${{ vars.RAKAY_WEB_API_URL || '/api/v1' }}
     steps:
       - name: Checkout private rakay
         uses: actions/checkout@v7
