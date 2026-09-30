@@ -72,7 +72,7 @@ jobs:
       - name: Warn when the secret is missing
         if: ${{ env.RAKAY_PAT_SET != 'true' }}
         run: |
-          echo "::warning::RAKAY_PAT is not configured on this repository, so there is nothing to authenticate with. Add it in Settings → Secrets and variables → Actions — see README.md."
+          echo "::warning::RAKAY_PAT is not configured on this repository, so there is nothing to authenticate with. Add it in Settings → Secrets and variables → Actions."
 
       # RAKAY_PAT already exists here — it is what ci.yml uses to check the
       # private rakay out and to post the commit status back. Reusing it means no

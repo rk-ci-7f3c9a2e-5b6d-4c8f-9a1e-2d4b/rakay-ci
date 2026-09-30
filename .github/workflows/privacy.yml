@@ -70,7 +70,7 @@ jobs:
 
           if [ "$fail" -ne 0 ]; then
             echo
-            echo "See README.md → «What is left here after a run» before changing this."
+            echo "Nothing derived from the private repository may be parked in a public one — that is what this guard enforces."
             exit 1
           fi
           echo "OK — no artifact upload, no gha cache, and the only committed path is .ci-state/state.json."
