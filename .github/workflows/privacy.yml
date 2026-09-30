@@ -68,9 +68,26 @@ jobs:
             done
           done
 
+          # 4. Docker build records. `docker/build-push-action` uploads a
+          #    *.dockerbuild build record as a GitHub artifact unless
+          #    DOCKER_BUILD_RECORD_UPLOAD is "false". It carries no
+          #    `upload-artifact` step and no `type=gha` cache, so checks 1 and 2
+          #    never see it — yet it is built from the private source and left on
+          #    this public repository on every run.
+          for f in "$WFS"/*.yml; do
+            case "$(basename "$f")" in
+              privacy.yml) continue ;;
+            esac
+            grep -q "docker/build-push-action" "$f" || continue
+            if ! grep -qE 'DOCKER_BUILD_RECORD_UPLOAD:[[:space:]]*"?false"?' "$f"; then
+              echo "::error::$f builds with docker/build-push-action but does not set DOCKER_BUILD_RECORD_UPLOAD: \"false\" — it would upload a public *.dockerbuild artifact derived from the private build."
+              fail=1
+            fi
+          done
+
           if [ "$fail" -ne 0 ]; then
             echo
             echo "Nothing derived from the private repository may be parked in a public one — that is what this guard enforces."
             exit 1
           fi
-          echo "OK — no artifact upload, no gha cache, and the only committed path is .ci-state/state.json."
+          echo "OK — no artifact upload, no gha cache, no docker build records, and the only committed path is .ci-state/state.json."

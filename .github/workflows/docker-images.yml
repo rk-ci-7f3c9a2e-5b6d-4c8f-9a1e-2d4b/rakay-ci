@@ -47,6 +47,14 @@ env:
   # One tag, two triggers: an input when dispatched by hand, a payload field
   # when poll.yml found the tag on its own.
   TAG: ${{ github.event.inputs.tag || github.event.client_payload.tag }}
+  # `docker/build-push-action` uploads a *.dockerbuild build record as a GitHub
+  # artifact by default, and writes a job summary. On this PUBLIC repo that is a
+  # private-derived artifact left behind on every run, and it appears even though
+  # the workflow uses no `upload-artifact` step and no `type=gha` cache. Disable
+  # both so the repo is clean after every run, pass or fail — nothing to delete.
+  # privacy.yml enforces this.
+  DOCKER_BUILD_SUMMARY: "false"
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
 
 jobs:
   # Publishing an image tag that never passed CI is how a broken revision reaches
