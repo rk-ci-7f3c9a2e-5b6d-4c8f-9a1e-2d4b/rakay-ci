@@ -80,7 +80,7 @@ jobs:
           repository: ${{ env.RAKAY_REPO }}
           ref: ${{ inputs.tag }}
           token: ${{ secrets.RAKAY_PAT }}
-          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -123,5 +123,10 @@ jobs:
             org.opencontainers.image.version=${{ inputs.tag }}
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: ${{ matrix.build_args }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          # No `cache-from` / `cache-to: type=gha` on purpose. That cache lives in
+          # THIS public repository, and Docker's layer cache stores the layer
+          # contents — including the ones produced by the COPY of the private
+          # source and by the builds themselves. Rebuild time is the price of not
+          # parking the private tree in a public cache. If it ever becomes a
+          # problem, `type=registry` against the private GHCR namespace is the
+          # cache that does not leak.

@@ -63,6 +63,12 @@ jobs:
           # (repository_dispatch). checkout accepts both.
           ref: ${{ github.event.inputs.ref || github.event.client_payload.sha }}
           token: ${{ secrets.RAKAY_PAT }}
+          # Keeps the PAT out of the workspace's .git/config for the rest of the
+          # job. `pnpm install` runs lifecycle scripts from third-party packages
+          # right after this, and a workspace holding a token that can read the
+          # private repo is exactly what such a script would look for. Checkout
+          # only needs the credential while it runs.
+          persist-credentials: false
 
       # Order matters: setup-node's `cache: pnpm` shells out to pnpm, so pnpm has
       # to exist first. No `version` is passed — the action reads

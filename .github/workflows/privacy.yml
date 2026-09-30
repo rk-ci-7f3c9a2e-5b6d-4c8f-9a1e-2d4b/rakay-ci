@@ -1,0 +1,76 @@
+name: Privacy guard
+
+# The whole point of this repository is that the code stays private: rakay is
+# private because we do not want it public, and this public repo exists only
+# because public repositories get unlimited free Actions minutes.
+#
+# That trade is safe as long as nothing private is ever parked here. This guard
+# is what makes that a rule instead of a habit: it fails the moment a workflow in
+# this repository gains a way to leave something behind.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: Nothing private can be parked here
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Inspect the workflows
+        run: |
+          set -uo pipefail
+          fail=0
+          # This file carries the very strings it looks for, so it excludes
+          # itself from every scan. `nocomments` drops lines that only mention a
+          # pattern in a comment — the explanations in docker-images.yml would
+          # otherwise trip the guard.
+          WFS=.github/workflows
+          nocomments() { grep -vE ': *#'; }
+
+          # 1. Artifacts. An uploaded artifact is downloadable by anyone on a
+          #    public repository, and would hold build output — dist/, .next,
+          #    whatever the step was given.
+          if hit=$(grep -rn --exclude=privacy.yml "upload-artifact" "$WFS" | nocomments || true) && [ -n "$hit" ]; then
+            echo "::error::upload-artifact found — an artifact in this public repository is public:"
+            echo "$hit"
+            fail=1
+          fi
+
+          # 2. Docker layer cache. `type=gha` stores the layer CONTENTS in this
+          #    repository's Actions cache, and those layers are built from the
+          #    private tree (COPY of the source, compiled output).
+          if hit=$(grep -rn --exclude=privacy.yml "type=gha" "$WFS" | nocomments || true) && [ -n "$hit" ]; then
+            echo "::error::a Docker cache of type=gha would store private-derived layers in this public repository:"
+            echo "$hit"
+            fail=1
+          fi
+
+          # 3. The workflows may only ever commit .ci-state — the file holding
+          #    the SHAs already tested. Anything else means the checkout of the
+          #    private repo has a path back into this one. The pattern is
+          #    anchored to the start of a line so that a mention inside a comment
+          #    or a string is not read as a command.
+          for f in "$WFS"/*.yml; do
+            for path in $(grep -oE '^[[:space:]]*git add [^&|;]+' "$f" | sed -E 's/^[[:space:]]*git add //'); do
+              case "$path" in
+                .ci-state/state.json) ;;
+                *) echo "::error::$f commits '$path', which is not .ci-state/state.json"; fail=1 ;;
+              esac
+            done
+          done
+
+          if [ "$fail" -ne 0 ]; then
+            echo
+            echo "See README.md → «What is left here after a run» before changing this."
+            exit 1
+          fi
+          echo "OK — no artifact upload, no gha cache, and the only committed path is .ci-state/state.json."
