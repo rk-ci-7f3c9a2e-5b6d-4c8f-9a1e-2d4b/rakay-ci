@@ -1,6 +1,48 @@
 {
   "version": 2,
   "runs": {
+    "41d6b98f427363fd4a307eeb9123e06e42d43971": {
+      "ref": "refs/tags/v0.1.1",
+      "kind": "tag:v0.1.1",
+      "state": "success",
+      "desc": "lint + typecheck + test + build passed",
+      "at": "2026-09-30T20:46:15.279Z"
+    },
+    "a8390db2935dc22aec88df76a66e52f50ba87a8d": {
+      "ref": "refs/tags/v0.1.2",
+      "kind": "tag:v0.1.2",
+      "state": "success",
+      "desc": "lint + typecheck + test + build passed",
+      "at": "2026-09-30T20:46:14.921Z"
+    },
+    "86cce3a03ec3415b906795decaffe6e26b5f71c8": {
+      "ref": "refs/tags/v0.1.3",
+      "kind": "tag:v0.1.3",
+      "state": "success",
+      "desc": "lint + typecheck + test + build passed",
+      "at": "2026-09-30T20:46:14.612Z"
+    },
+    "64ebe1b1fe5c40c729f4535976c1d29d830a7761": {
+      "ref": "refs/tags/v0.1.4",
+      "kind": "tag:v0.1.4",
+      "state": "success",
+      "desc": "lint + typecheck + test + build passed",
+      "at": "2026-09-30T20:46:14.215Z"
+    },
+    "306a6fe35ffd328e6d71ec595e60c44314d36639": {
+      "ref": "refs/tags/v0.1.5",
+      "kind": "tag:v0.1.5",
+      "state": "success",
+      "desc": "lint + typecheck + test + build passed",
+      "at": "2026-09-30T20:46:13.780Z"
+    },
+    "44f797e21e2bf2578f96fcfe8d17e71998157c66": {
+      "ref": "refs/heads/main",
+      "kind": "branch",
+      "state": "success",
+      "desc": "lint + typecheck + test + build passed",
+      "at": "2026-09-30T20:46:13.221Z"
+    },
     "9ecb17b311fe89ff37c5344e019278f1459869c2": {
       "ref": "refs/heads/main",
       "kind": "branch",
@@ -16,6 +58,36 @@
     }
   },
   "tags": {
+    "v0.1.1": {
+      "sha": "41d6b98f427363fd4a307eeb9123e06e42d43971",
+      "state": "released",
+      "at": "2026-09-30T20:46:15.411Z"
+    },
+    "v0.1.2": {
+      "sha": "a8390db2935dc22aec88df76a66e52f50ba87a8d",
+      "state": "released",
+      "at": "2026-09-30T20:46:15.094Z"
+    },
+    "v0.1.3": {
+      "sha": "86cce3a03ec3415b906795decaffe6e26b5f71c8",
+      "state": "released",
+      "at": "2026-09-30T20:46:14.744Z"
+    },
+    "v0.1.4": {
+      "sha": "64ebe1b1fe5c40c729f4535976c1d29d830a7761",
+      "state": "released",
+      "at": "2026-09-30T20:46:14.404Z"
+    },
+    "v0.1.5": {
+      "sha": "306a6fe35ffd328e6d71ec595e60c44314d36639",
+      "state": "released",
+      "at": "2026-09-30T20:46:13.998Z"
+    },
+    "v0.1.6": {
+      "sha": "44f797e21e2bf2578f96fcfe8d17e71998157c66",
+      "state": "released",
+      "at": "2026-09-30T20:46:13.573Z"
+    },
     "v0.1.0": {
       "sha": "9ecb17b311fe89ff37c5344e019278f1459869c2",
       "state": "released",
