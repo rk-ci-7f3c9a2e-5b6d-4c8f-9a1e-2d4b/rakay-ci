@@ -1,11 +1,25 @@
 {
-  "version": 1,
+  "version": 2,
   "runs": {
+    "9ecb17b311fe89ff37c5344e019278f1459869c2": {
+      "ref": "refs/heads/main",
+      "kind": "branch",
+      "state": "success",
+      "desc": "lint + typecheck + test + build passed",
+      "at": "2026-09-30T16:02:48.268Z"
+    },
     "65947735beb1e15ec2bc5ce4316eab768ca103ef": {
       "ref": "refs/heads/main",
       "kind": "branch",
       "state": "pending",
       "at": "2026-09-30T09:38:01.963Z"
+    }
+  },
+  "tags": {
+    "v0.1.0": {
+      "sha": "9ecb17b311fe89ff37c5344e019278f1459869c2",
+      "state": "released",
+      "at": "2026-09-30T16:02:48.744Z"
     }
   }
 }
